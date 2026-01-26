@@ -1,0 +1,48 @@
+name: build-win64-portable-openssh
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "latestw_all" ]
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 构建脚本会用到 VS/MSBuild（windows-2022 runner 自带 VS 2022 工具链）
+      - name: Build + Package (x64 Release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # 导入官方构建模块
+          Import-Module .\contrib\win32\openssh\OpenSSHBuildHelper.psm1 -Force
+
+          # 编译
+          Start-OpenSSHBuild -Configuration Release -NativeHostArch x64
+
+          # 某些情况下需要把 libcrypto.dll 复制到输出目录（有就拷贝）
+          $src = ".\contrib\win32\openssh\libressl\bin\desktop\x64\libcrypto.dll"
+          $dstDir = ".\bin\x64\Release"
+          if (Test-Path $src) {
+            Copy-Item $src (Join-Path $dstDir "libcrypto.dll") -Force
+          }
+
+          # 打包：会生成便携 zip（以及可能的 symbols）
+          Start-OpenSSHPackage -Configuration Release -NativeHostArch x64
+
+          # 为了便于上传，收集所有 zip 到统一目录
+          New-Item -ItemType Directory -Path ".\_artifacts" -Force | Out-Null
+          Get-ChildItem -Recurse -Filter *.zip | Copy-Item -Destination ".\_artifacts" -Force
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenSSH-Win64-Portable
+          path: |
+            _artifacts\*.zip
+            bin\x64\Release\*
