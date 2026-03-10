@@ -1,23 +1,19 @@
-name: build-portable-openssh
+name: portable-openssh
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-
-env:
-  OPENSSH_VERSION: 9.7p1
 
 jobs:
 
-  build-linux:
-    name: Linux Static Build
+  build:
     runs-on: ubuntu-latest
 
     steps:
 
-    - name: Install dependencies
+    - uses: actions/checkout@v4
+
+    - name: Install deps
       run: |
         sudo apt update
         sudo apt install -y \
@@ -28,17 +24,22 @@ jobs:
           libtool \
           pkg-config \
           musl-tools \
+          mingw-w64 \
           zlib1g-dev \
           libssl-dev
 
     - name: Download OpenSSH
       run: |
-        wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${OPENSSH_VERSION}.tar.gz
-        tar xzf openssh-${OPENSSH_VERSION}.tar.gz
+        wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.7p1.tar.gz
+        tar xzf openssh-9.7p1.tar.gz
 
-    - name: Build static OpenSSH
+    ##################################
+    # Linux static
+    ##################################
+
+    - name: Build Linux static ssh
       run: |
-        cd openssh-${OPENSSH_VERSION}
+        cd openssh-9.7p1
 
         CC=musl-gcc ./configure \
           --without-pam \
@@ -53,91 +54,50 @@ jobs:
 
         cp ssh scp sftp ssh-keygen ssh-keyscan ../release/
 
-    - name: Package
+    ##################################
+    # Windows build
+    ##################################
+
+    - name: Clean
       run: |
-        cd release
-        tar czf ../openssh-linux-static.tar.gz *
+        cd openssh-9.7p1
+        make distclean || true
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: openssh-linux-static
-        path: openssh-linux-static.tar.gz
-
-
-  build-windows:
-    name: Windows Portable Build
-    runs-on: ubuntu-latest
-
-    steps:
-
-    - name: Install dependencies
+    - name: Configure windows
       run: |
-        sudo apt update
-        sudo apt install -y \
-          mingw-w64 \
-          build-essential \
-          wget \
-          autoconf \
-          automake \
-          libtool \
-          pkg-config \
-          zlib1g-dev \
-          libssl-dev
-
-    - name: Download OpenSSH
-      run: |
-        wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${OPENSSH_VERSION}.tar.gz
-        tar xzf openssh-${OPENSSH_VERSION}.tar.gz
-
-    - name: Configure
-      run: |
-        cd openssh-${OPENSSH_VERSION}
+        cd openssh-9.7p1
 
         ./configure \
           --host=x86_64-w64-mingw32 \
           --without-pam
 
-    - name: Build
+    - name: Build windows
       run: |
-        cd openssh-${OPENSSH_VERSION}
+        cd openssh-9.7p1
 
         make -j$(nproc) \
           ssh scp sftp ssh-keygen ssh-keyscan
 
-        mkdir ../release
-
         cp ssh.exe scp.exe sftp.exe ssh-keygen.exe ssh-keyscan.exe ../release/
+
+    ##################################
+    # Package
+    ##################################
 
     - name: Package
       run: |
         cd release
-        zip ../openssh-windows-portable.zip *
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
+        tar czf ../openssh-linux.tar.gz ssh scp sftp ssh-keygen ssh-keyscan
+        zip ../openssh-windows.zip ssh.exe scp.exe sftp.exe ssh-keygen.exe ssh-keyscan.exe
+
+    ##################################
+    # Upload
+    ##################################
+
+    - uses: actions/upload-artifact@v4
       with:
-        name: openssh-windows-portable
-        path: openssh-windows-portable.zip
-
-
-  release:
-    name: Create Release
-    needs:
-      - build-linux
-      - build-windows
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-
-    steps:
-
-    - uses: actions/download-artifact@v4
-
-    - name: Create release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: openssh-${{ github.run_number }}
-        name: Portable OpenSSH Build
-        files: |
-          openssh-linux-static/openssh-linux-static.tar.gz
-          openssh-windows-portable/openssh-windows-portable.zip
+        name: portable-openssh
+        path: |
+          openssh-linux.tar.gz
+          openssh-windows.zip
