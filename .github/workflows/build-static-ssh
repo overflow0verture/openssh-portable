@@ -1,0 +1,92 @@
+name: build-static-ssh
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+
+  build-linux:
+    name: Build Linux Static SSH
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install deps
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            wget \
+            musl-tools \
+            zlib1g-dev \
+            libssl-dev \
+            pkg-config \
+            autoconf \
+            automake \
+            libtool
+
+      - name: Download OpenSSH
+        run: |
+          wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.7p1.tar.gz
+          tar xzf openssh-9.7p1.tar.gz
+
+      - name: Build static ssh
+        run: |
+          cd openssh-9.7p1
+
+          CC=musl-gcc ./configure \
+            --without-pam \
+            --without-openssl-header-check \
+            --disable-shared \
+            --enable-static \
+            LDFLAGS="-static"
+
+          make -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-linux-static
+          path: openssh-9.7p1/ssh
+
+
+  build-windows:
+    name: Build Windows SSH
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install mingw
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            mingw-w64 \
+            gcc-mingw-w64 \
+            build-essential \
+            wget \
+            autoconf \
+            automake \
+            libtool
+
+      - name: Download OpenSSH
+        run: |
+          wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.7p1.tar.gz
+          tar xzf openssh-9.7p1.tar.gz
+
+      - name: Configure
+        run: |
+          cd openssh-9.7p1
+          ./configure \
+            --host=x86_64-w64-mingw32 \
+            --without-pam \
+            --disable-shared
+
+      - name: Build
+        run: |
+          cd openssh-9.7p1
+          make -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-windows
+          path: openssh-9.7p1/ssh.exe
