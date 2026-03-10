@@ -1,4 +1,4 @@
-name: Build fully static SSH binaries
+name: Build static SSH binaries
 
 on:
   workflow_dispatch:
@@ -53,15 +53,18 @@ jobs:
             --disable-security-key \
             --disable-strip
 
-      - name: Build
-        run: make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
+      - name: Build selected client binaries
+        run: make -j"$(getconf _NPROCESSORS_ONLN || echo 2)" ssh scp sftp ssh-keygen ssh-keyscan
 
       - name: Verify static linkage
         run: |
           for bin in ssh scp sftp ssh-keygen ssh-keyscan; do
             echo "=== $bin ==="
             file "$bin"
-            ldd "$bin" 2>/dev/null && { echo "$bin is not fully static"; exit 1; } || true
+            if ldd "$bin" 2>/dev/null; then
+              echo "$bin is not fully static"
+              exit 1
+            fi
           done
 
       - name: Package artifacts
@@ -84,75 +87,69 @@ jobs:
             config.log
             **/*.log
 
-  windows-static:
-    name: Windows (mingw-w64, static)
+  windows-cygwin:
+    name: Windows (Cygwin, supported upstream)
     runs-on: windows-latest
-
-    defaults:
-      run:
-        shell: msys2 {0}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
+      - name: Install Cygwin and deps
+        uses: cygwin/cygwin-install-action@v4
         with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            base-devel
-            git
-            file
+          packages: >-
             autoconf
             automake
+            binutils
+            gcc-core
+            gcc-g++
             libtool
             make
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-binutils
-            mingw-w64-x86_64-openssl
-            mingw-w64-x86_64-zlib
-            mingw-w64-x86_64-pkgconf
+            openssl-devel
+            zlib-devel
+            pkg-config
+            file
 
       - name: Regenerate configure
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail {0}
         run: autoreconf -fi
 
       - name: Configure
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail {0}
         env:
           CFLAGS: -O2 -pipe
-          LDFLAGS: -static -static-libgcc
+          LDFLAGS: -static
         run: |
           ./configure \
-            --without-zlib-version-check \
             --without-pam \
             --without-kerberos5 \
             --without-libedit \
             --disable-security-key \
             --disable-strip
 
-      - name: Build
-        run: make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
+      - name: Build selected client binaries
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail {0}
+        run: make -j"$(getconf _NPROCESSORS_ONLN || echo 2)" ssh scp sftp ssh-keygen ssh-keyscan
 
-      - name: Verify linkage and package artifacts
+      - name: Package artifacts
+        shell: C:\cygwin\bin\bash.exe --noprofile --norc -eo pipefail {0}
         run: |
-          mkdir -p dist/windows-static
-          for bin in ssh.exe scp.exe sftp.exe ssh-keygen.exe ssh-keyscan.exe; do
-            file "$bin"
-            cp "$bin" dist/windows-static/
-          done
+          mkdir -p dist/windows-cygwin
+          cp ssh.exe scp.exe sftp.exe ssh-keygen.exe ssh-keyscan.exe dist/windows-cygwin/
+          file dist/windows-cygwin/*
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ssh-windows-static
-          path: dist/windows-static/
+          name: ssh-windows-cygwin
+          path: dist/windows-cygwin/
 
       - name: Upload failure logs (Windows)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-static-logs
+          name: windows-cygwin-logs
           path: |
             config.log
             **/*.log
