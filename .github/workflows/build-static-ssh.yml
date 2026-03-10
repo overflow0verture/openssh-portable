@@ -1,0 +1,146 @@
+name: Build fully static SSH binaries
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  linux-static:
+    name: Linux (musl, static)
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3.20
+
+    steps:
+      - name: Install build tools
+        run: |
+          apk add --no-cache \
+            bash \
+            git \
+            file \
+            coreutils \
+            build-base \
+            linux-headers \
+            autoconf \
+            automake \
+            libtool \
+            pkgconfig \
+            openssl-dev \
+            openssl-libs-static \
+            zlib-dev \
+            zlib-static
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Regenerate configure
+        run: autoreconf -fi
+
+      - name: Configure
+        env:
+          CFLAGS: -O2 -pipe
+          LDFLAGS: -static
+        run: |
+          ./configure \
+            --without-pam \
+            --without-selinux \
+            --without-kerberos5 \
+            --without-libedit \
+            --without-security-key-builtin \
+            --disable-strip
+
+      - name: Build
+        run: make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
+
+      - name: Verify static linkage
+        run: |
+          for bin in ssh scp sftp ssh-keygen ssh-keyscan; do
+            echo "=== $bin ==="
+            file "$bin"
+            ldd "$bin" 2>/dev/null && { echo "$bin is not fully static"; exit 1; } || true
+          done
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist/linux-static
+          cp ssh scp sftp ssh-keygen ssh-keyscan dist/linux-static/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-linux-static
+          path: dist/linux-static/
+
+  windows-static:
+    name: Windows (mingw-w64, static)
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            git
+            file
+            autoconf
+            automake
+            libtool
+            make
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-binutils
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-pkgconf
+
+      - name: Regenerate configure
+        run: autoreconf -fi
+
+      - name: Configure
+        env:
+          CC: x86_64-w64-mingw32-gcc
+          AR: x86_64-w64-mingw32-ar
+          RANLIB: x86_64-w64-mingw32-ranlib
+          PKG_CONFIG: x86_64-w64-mingw32-pkg-config
+          CFLAGS: -O2 -pipe
+          CPPFLAGS: -D_POSIX
+          LDFLAGS: -static -static-libgcc
+        run: |
+          ./configure \
+            --host=x86_64-w64-mingw32 \
+            --without-zlib-version-check \
+            --without-pam \
+            --without-kerberos5 \
+            --without-libedit \
+            --without-security-key-builtin \
+            --disable-strip
+
+      - name: Build
+        run: make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
+
+      - name: Verify linkage and package artifacts
+        run: |
+          mkdir -p dist/windows-static
+          for bin in ssh.exe scp.exe sftp.exe ssh-keygen.exe ssh-keyscan.exe; do
+            file "$bin"
+            cp "$bin" dist/windows-static/
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-windows-static
+          path: dist/windows-static/
