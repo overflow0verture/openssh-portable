@@ -1,17 +1,23 @@
-name: build-portable-ssh
+name: build-portable-openssh
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+
+env:
+  OPENSSH_VERSION: 9.7p1
 
 jobs:
 
-  build:
+  build-linux:
+    name: Linux Static Build
     runs-on: ubuntu-latest
 
     steps:
 
-    - name: Install deps
+    - name: Install dependencies
       run: |
         sudo apt update
         sudo apt install -y \
@@ -21,23 +27,18 @@ jobs:
           automake \
           libtool \
           pkg-config \
+          musl-tools \
           zlib1g-dev \
-          libssl-dev \
-          mingw-w64 \
-          musl-tools
+          libssl-dev
 
     - name: Download OpenSSH
       run: |
-        wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.7p1.tar.gz
-        tar xzf openssh-9.7p1.tar.gz
+        wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${OPENSSH_VERSION}.tar.gz
+        tar xzf openssh-${OPENSSH_VERSION}.tar.gz
 
-    ########################
-    # Linux static build
-    ########################
-
-    - name: Build Linux static ssh
+    - name: Build static OpenSSH
       run: |
-        cd openssh-9.7p1
+        cd openssh-${OPENSSH_VERSION}
 
         CC=musl-gcc ./configure \
           --without-pam \
@@ -45,35 +46,98 @@ jobs:
           --enable-static \
           LDFLAGS="-static"
 
-        make ssh -j$(nproc)
+        make -j$(nproc) \
+          ssh scp sftp ssh-keygen ssh-keyscan
 
         mkdir ../release
-        cp ssh ../release/ssh-linux
 
-    ########################
-    # Windows build
-    ########################
+        cp ssh scp sftp ssh-keygen ssh-keyscan ../release/
 
-    - name: Build Windows ssh
+    - name: Package
       run: |
-        cd openssh-9.7p1
+        cd release
+        tar czf ../openssh-linux-static.tar.gz *
 
-        make distclean || true
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: openssh-linux-static
+        path: openssh-linux-static.tar.gz
+
+
+  build-windows:
+    name: Windows Portable Build
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          mingw-w64 \
+          build-essential \
+          wget \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libssl-dev
+
+    - name: Download OpenSSH
+      run: |
+        wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${OPENSSH_VERSION}.tar.gz
+        tar xzf openssh-${OPENSSH_VERSION}.tar.gz
+
+    - name: Configure
+      run: |
+        cd openssh-${OPENSSH_VERSION}
 
         ./configure \
           --host=x86_64-w64-mingw32 \
           --without-pam
 
-        make ssh -j$(nproc)
+    - name: Build
+      run: |
+        cd openssh-${OPENSSH_VERSION}
 
-        cp ssh.exe ../release/
+        make -j$(nproc) \
+          ssh scp sftp ssh-keygen ssh-keyscan
 
-    ########################
-    # Upload
-    ########################
+        mkdir ../release
 
-    - name: Upload
+        cp ssh.exe scp.exe sftp.exe ssh-keygen.exe ssh-keyscan.exe ../release/
+
+    - name: Package
+      run: |
+        cd release
+        zip ../openssh-windows-portable.zip *
+
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ssh-portable
-        path: release/*
+        name: openssh-windows-portable
+        path: openssh-windows-portable.zip
+
+
+  release:
+    name: Create Release
+    needs:
+      - build-linux
+      - build-windows
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+
+    - uses: actions/download-artifact@v4
+
+    - name: Create release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: openssh-${{ github.run_number }}
+        name: Portable OpenSSH Build
+        files: |
+          openssh-linux-static/openssh-linux-static.tar.gz
+          openssh-windows-portable/openssh-windows-portable.zip
