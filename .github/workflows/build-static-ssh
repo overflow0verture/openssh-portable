@@ -1,92 +1,79 @@
-name: build-static-ssh
+name: build-portable-ssh
 
 on:
-  push:
   workflow_dispatch:
+  push:
 
 jobs:
 
-  build-linux:
-    name: Build Linux Static SSH
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install deps
-        run: |
-          sudo apt update
-          sudo apt install -y \
-            build-essential \
-            wget \
-            musl-tools \
-            zlib1g-dev \
-            libssl-dev \
-            pkg-config \
-            autoconf \
-            automake \
-            libtool
 
-      - name: Download OpenSSH
-        run: |
-          wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.7p1.tar.gz
-          tar xzf openssh-9.7p1.tar.gz
+    - name: Install deps
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          build-essential \
+          wget \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libssl-dev \
+          mingw-w64 \
+          musl-tools
 
-      - name: Build static ssh
-        run: |
-          cd openssh-9.7p1
+    - name: Download OpenSSH
+      run: |
+        wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.7p1.tar.gz
+        tar xzf openssh-9.7p1.tar.gz
 
-          CC=musl-gcc ./configure \
-            --without-pam \
-            --without-openssl-header-check \
-            --disable-shared \
-            --enable-static \
-            LDFLAGS="-static"
+    ########################
+    # Linux static build
+    ########################
 
-          make -j$(nproc)
+    - name: Build Linux static ssh
+      run: |
+        cd openssh-9.7p1
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ssh-linux-static
-          path: openssh-9.7p1/ssh
+        CC=musl-gcc ./configure \
+          --without-pam \
+          --disable-shared \
+          --enable-static \
+          LDFLAGS="-static"
 
+        make ssh -j$(nproc)
 
-  build-windows:
-    name: Build Windows SSH
-    runs-on: ubuntu-latest
+        mkdir ../release
+        cp ssh ../release/ssh-linux
 
-    steps:
-      - name: Install mingw
-        run: |
-          sudo apt update
-          sudo apt install -y \
-            mingw-w64 \
-            gcc-mingw-w64 \
-            build-essential \
-            wget \
-            autoconf \
-            automake \
-            libtool
+    ########################
+    # Windows build
+    ########################
 
-      - name: Download OpenSSH
-        run: |
-          wget https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.7p1.tar.gz
-          tar xzf openssh-9.7p1.tar.gz
+    - name: Build Windows ssh
+      run: |
+        cd openssh-9.7p1
 
-      - name: Configure
-        run: |
-          cd openssh-9.7p1
-          ./configure \
-            --host=x86_64-w64-mingw32 \
-            --without-pam \
-            --disable-shared
+        make distclean || true
 
-      - name: Build
-        run: |
-          cd openssh-9.7p1
-          make -j$(nproc)
+        ./configure \
+          --host=x86_64-w64-mingw32 \
+          --without-pam
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ssh-windows
-          path: openssh-9.7p1/ssh.exe
+        make ssh -j$(nproc)
+
+        cp ssh.exe ../release/
+
+    ########################
+    # Upload
+    ########################
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: ssh-portable
+        path: release/*
