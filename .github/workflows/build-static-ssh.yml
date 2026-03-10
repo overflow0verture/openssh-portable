@@ -50,7 +50,7 @@ jobs:
             --without-selinux \
             --without-kerberos5 \
             --without-libedit \
-            --without-security-key-builtin \
+            --disable-security-key \
             --disable-strip
 
       - name: Build
@@ -74,6 +74,15 @@ jobs:
         with:
           name: ssh-linux-static
           path: dist/linux-static/
+
+      - name: Upload failure logs (Linux)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-static-logs
+          path: |
+            config.log
+            **/*.log
 
   windows-static:
     name: Windows (mingw-w64, static)
@@ -111,21 +120,15 @@ jobs:
 
       - name: Configure
         env:
-          CC: x86_64-w64-mingw32-gcc
-          AR: x86_64-w64-mingw32-ar
-          RANLIB: x86_64-w64-mingw32-ranlib
-          PKG_CONFIG: x86_64-w64-mingw32-pkg-config
           CFLAGS: -O2 -pipe
-          CPPFLAGS: -D_POSIX
           LDFLAGS: -static -static-libgcc
         run: |
           ./configure \
-            --host=x86_64-w64-mingw32 \
             --without-zlib-version-check \
             --without-pam \
             --without-kerberos5 \
             --without-libedit \
-            --without-security-key-builtin \
+            --disable-security-key \
             --disable-strip
 
       - name: Build
@@ -144,3 +147,12 @@ jobs:
         with:
           name: ssh-windows-static
           path: dist/windows-static/
+
+      - name: Upload failure logs (Windows)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-static-logs
+          path: |
+            config.log
+            **/*.log
